@@ -9,9 +9,8 @@ C.R.I.S.P. is a Python-based web proxy tool, designed to intercept, modify, and 
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#architecture"><strong>Architecture</strong></a> ·
   <a href="#tech-stack"><strong>Tech Stack</strong></a> ·
-  <a href="#dependencies"><strong>Dependencies</strong></a> ·
-  <a href="#license"><strong>License</strong></a> ·
-  <a href="#acknowledgments"><strong>Acknowledgments</strong></a>
+  <a href="#dependencies"><strong>Dependencies</strong></a>
+
 
 ## Features
 
@@ -61,14 +60,3 @@ The following Python libraries are required to run the project:
 - threading (for concurrent operations)
 - logging (for logging requests and responses)
 - ssl (for SSL/TLS certificate generation)
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-<!-- This README template is a starting point for your project.>
-This README outlines the features, architecture, and file structure for the project. You can customize it further based on specific implementation details or preferences. -->
-
-
-
-
-
-
