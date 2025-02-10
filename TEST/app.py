@@ -1,21 +1,18 @@
-import flask 
-from flask import Flask, render_template
-import requests
-import sqlite3
-
+from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-PORT = 8001
+intercept_enabled = False  # Global variable to track intercept status
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
-    database = sqlite3.connect('./Captured_requests.db')
-    cursor = database.cursor()
-    entries = cursor.execute('select * from all_requests order by Request_Number desc')
-    
-    return render_template("home.html", entries=entries)
+    return render_template('index.html', intercept=intercept_enabled)
 
+@app.route('/toggle_intercept', methods=['POST'])
+def toggle_intercept():
+    global intercept_enabled
+    intercept_enabled = not intercept_enabled
+    return jsonify({'intercept': intercept_enabled})
 
-if __name__ == "__main__":
-    app.run(port=PORT)
+if __name__ == '__main__':
+    app.run(port=5000, debug=True)

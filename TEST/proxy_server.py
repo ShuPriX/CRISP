@@ -1,87 +1,91 @@
+from http import server
 import socket
 import threading
 import sqlite3
 import signal
 import sys
 import time
+import subprocess
+
+intercept_enabled = False
 
 def setup_database():
     database = sqlite3.connect('Captured_requests.db')
     cursor = database.cursor()
-    try:
-        cursor.execute('drop table all_requests')
-    except:
-        pass
-    cursor.execute('create table all_requests (Request_Number float, Request text, Response text)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS all_requests (Request_Number FLOAT, Request TEXT, Response TEXT)')
     database.close()
 
+def edit_request(data):
+    with open('intercepted_request.txt', 'w') as file:
+        file.write(data)
+    subprocess.run(['notepad.exe', 'intercepted_request.txt'])
+    with open('intercepted_request.txt', 'r') as file:
+        return file.read()
 
 def handle_client_request(client_socket):
+    global intercept_enabled
     database = sqlite3.connect('Captured_requests.db')
     cursor = database.cursor()
-
-    print("Received request:\n")
-    request = b''
+    
+    request_data = b''
     client_socket.setblocking(False)
     while True:
         try:
-            data = client_socket.recv(2*1024)
-            request = request + data
-            print(f"{data.decode('utf-8')}")
+            data = client_socket.recv(2048)
+            if not data:
+                break
+            request_data += data
         except:
             break
-    host, port = extract_host_port_from_request(request)
+    
+    request_str = request_data.decode(errors='ignore')
+    
+    if intercept_enabled:
+        print("Intercepted request, waiting for modification...")
+        request_str = edit_request(request_str)
+    
+    host, port = extract_host_port_from_request(request_data)
+    
     destination_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     destination_socket.connect((host, port))
-    destination_socket.sendall(request)
-    print("Received response:\n")
-    response = bytes()
+    destination_socket.sendall(request_str.encode())
+    
+    response_data = b''
     destination_socket.settimeout(10.0)
     while True:
         try:
-            data = destination_socket.recv(2*1024)
-            response += data
+            data = destination_socket.recv(2048)
             if len(data) > 0:
+                response_data += data
                 client_socket.sendall(data)
             else:
                 break
-        except KeyboardInterrupt:
-            destination_socket.close()
-            client_socket.close()
-        except TimeoutError:
+        except:
             break
-    print(response.decode())
-    cursor.execute('insert into all_requests values (?,?,?)', (time.time(), request.decode(), response.decode()))
+    
+    cursor.execute('INSERT INTO all_requests VALUES (?, ?, ?)', (time.time(), request_str, response_data.decode(errors='ignore')))
+    database.commit()
+    cursor.close()
+    database.close()
+    
     destination_socket.close()
     client_socket.close()
-    print('<--------------------------------------------------------------------------------------->')
-    print('The database is:')
-    for row in cursor.execute('select * from all_requests order by Request_Number desc'):
-        print(row)
-    print('<--------------------------------------------------------------------------------------->')
-    cursor.close()
-    database.commit()
-    database.close()
 
 def extract_host_port_from_request(request):
-    host_string_start = request.find(b'Host: ') + len(b'Host: ')
-    host_string_end = request.find(b'\r\n', host_string_start)
-    host_string = request[host_string_start:host_string_end].decode('utf-8')
-    webserver_pos = host_string.find("/")
-    if webserver_pos == -1:
-        webserver_pos = len(host_string)
-    port_pos = host_string.find(":")
-    if port_pos == -1 or webserver_pos < port_pos:
-        port = 80
-        host = host_string[:webserver_pos]
-    else:
-        port = int((host_string[(port_pos + 1):])[:webserver_pos - port_pos - 1])
-        host = host_string[:port_pos]
-    return host, port
+    try:
+        headers = request.split(b'\r\n')
+        for header in headers:
+            if header.startswith(b'Host: '):
+                host = header.split(b' ')[1].decode()
+                if ':' in host:
+                    return host.split(':')[0], int(host.split(':')[1])
+                return host, 80
+    except:
+        pass
+    return 'localhost', 80
 
 def start_proxy_server():
     signal.signal(signal.SIGINT, shutdown_server)
-    global server, request_index
     setup_database()
     port = 8888
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

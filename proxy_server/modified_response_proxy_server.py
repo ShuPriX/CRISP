@@ -1,5 +1,9 @@
+from asyncio import Server
+from curses import reset_prog_mode
 import socket
 import threading
+import sqlite3
+from wsgiref.simple_server import server_version
 
 def modify_request(request):
     # Example modification: Change User-Agent header
@@ -8,13 +12,18 @@ def modify_request(request):
 
 def modify_response(response):
     # Example: Modify the response content
-    if "origin" in response:
-        response = response.replace("103.106.200.60", "127.0.0.1")  # Modify IP for testing purposes
+    response = response.replace("Server: Apache", "Server: CustomProxy")  # Modify IP for testing purposes
+   
     return response
 
 def handle_client_request(client_socket):
+    
+    database = sqlite3.connect('Captured_requests.db')
+    cursor = database.cursor()
+    
     print("Received request:")
     request = b''
+    
     client_socket.setblocking(False)
     
     while True:
@@ -37,16 +46,26 @@ def handle_client_request(client_socket):
     destination_socket.sendall(modified_request.encode('utf-8'))
     print("Request forwarded to the destination")
     
+    response = b""
     while True:
-        response = destination_socket.recv(1024)
+        data = destination_socket.recv(1024)
         if not response:
             break
+        
+        response += data
         # Modify the response before sending it to the client
-        modified_response = modify_response(response.decode('utf-8'))
-        client_socket.sendall(modified_response.encode('utf-8'))
+    modified_response = modify_response(response.decode('utf-8'))
+    client_socket.sendall(modified_response.encode('utf-8'))
+    
+    cursor.execute('INSERT INTO all_requests VALUES (CURRENT_TIMESTAMP, ?, ?)', 
+                   (modified_request, modified_response))
+    database.commit()    
+        
     
     destination_socket.close()
     client_socket.close()
+    cursor.close()
+    database.close()
 
 def extract_host_port_from_request(request):
     host_string_start = request.find('Host: ') + len('Host: ')
@@ -62,9 +81,10 @@ def extract_host_port_from_request(request):
 
 def start_proxy_server(port=8080):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(('127.0.0.1', port))
-    server.listen(5)
-    print(f"Proxy server running on port {port}")
+    server.listen(20)
+    print(f"Proxy server running on port {port}...")
 
     while True:
         client_socket, client_address = server.accept()
