@@ -1,89 +1,73 @@
 import socket
 import threading
-import sqlite3
-import signal
 import sys
-import time
+import signal
+import sqlite3
+from http import server
 
-def setup_database():
-    database = sqlite3.connect('Captured_requests.db')
-    cursor = database.cursor()
-    try:
-        cursor.execute('drop table all_requests')
-    except:
-        pass
-    cursor.execute('create table all_requests (Request_Number float, Request text, Response text)')
-    database.close()
-
+intercepted_requests = []
 
 def handle_client_request(client_socket):
-    database = sqlite3.connect('Captured_requests.db')
-    cursor = database.cursor()
-
-    print("Received request:\n")
-    request = b''
-    client_socket.setblocking(False)
-    while True:
-        try:
-            data = client_socket.recv(2*1024)
-            request = request + data
-            print(f"{data.decode('utf-8')}")
-        except:
-            break
-    host, port = extract_host_port_from_request(request)
-    destination_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    destination_socket.connect((host, port))
-    destination_socket.sendall(request)
-    print("Received response:\n")
-    response = bytes()
-    destination_socket.settimeout(10.0)
-    while True:
-        try:
-            data = destination_socket.recv(2*1024)
-            response += data
-            if len(data) > 0:
-                client_socket.sendall(data)
+    request = client_socket.recv(1024)
+    print(f"Received request: {request.decode('utf-8')}")
+    
+    # Parse the HTTP request
+    request_lines = request.decode('utf-8').split('\r\n')
+    if len(request_lines) > 0:
+        first_line = request_lines[0].split(' ')
+        if len(first_line) >= 3:
+            method, path, version = first_line
+            if method == 'GET':
+                # Handle GET request
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello from the proxy server!"
+                client_socket.send(response.encode('utf-8'))
             else:
-                break
-        except KeyboardInterrupt:
-            destination_socket.close()
-            client_socket.close()
-        except TimeoutError:
-            break
-    print(response.decode())
-    cursor.execute('insert into all_requests values (?,?,?)', (time.time(), request.decode(), response.decode()))
-    destination_socket.close()
+                # Handle other methods
+                response = f"HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\n\r\nMethod {method} not allowed."
+                client_socket.send(response.encode('utf-8'))
+            
+            # Store the request in the database
+            store_request_in_db(method, path, version, request.decode('utf-8'))
+        else:
+            response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nBad Request."
+            client_socket.send(response.encode('utf-8'))
     client_socket.close()
-    print('<--------------------------------------------------------------------------------------->')
-    print('The database is:')
-    for row in cursor.execute('select * from all_requests order by Request_Number desc'):
-        print(row)
-    print('<--------------------------------------------------------------------------------------->')
-    cursor.close()
-    database.commit()
-    database.close()
 
-def extract_host_port_from_request(request):
-    host_string_start = request.find(b'Host: ') + len(b'Host: ')
-    host_string_end = request.find(b'\r\n', host_string_start)
-    host_string = request[host_string_start:host_string_end].decode('utf-8')
-    webserver_pos = host_string.find("/")
-    if webserver_pos == -1:
-        webserver_pos = len(host_string)
-    port_pos = host_string.find(":")
-    if port_pos == -1 or webserver_pos < port_pos:
-        port = 80
-        host = host_string[:webserver_pos]
-    else:
-        port = int((host_string[(port_pos + 1):])[:webserver_pos - port_pos - 1])
-        host = host_string[:port_pos]
-    return host, port
+def store_request_in_db(method, path, version, request):
+    try:
+        # Connect to the SQLite database
+        database = sqlite3.connect('./Captured_requests.db')
+        cursor = database.cursor()
+        # Create table if it doesn't exist
+        cursor.execute('''CREATE TABLE IF NOT EXISTS all_requests (
+                            Request_Number INTEGER PRIMARY KEY AUTOINCREMENT,
+                            Method TEXT,
+                            Path TEXT,
+                            Version TEXT,
+                            Request TEXT)''')
+        # Insert the request into the table
+        cursor.execute('INSERT INTO all_requests (Method, Path, Version, Request) VALUES (?, ?, ?, ?)',
+                       (method, path, version, request))
+        # Commit the transaction and close the database connection
+        database.commit()
+        database.close()
+    except Exception as e:
+        print(f"Error storing request in database: {e}")
 
-def start_proxy_server():
-    signal.signal(signal.SIGINT, shutdown_server)
-    global server, request_index
-    setup_database()
-    port = 8888
+def intercept_request(request_id, modified_request):
+    try:
+        # Connect to the SQLite database
+        database = sqlite3.connect('./Captured_requests.db')
+        cursor = database.cursor()
+        # Update the request in the table
+        cursor.execute('UPDATE all_requests SET Request = ? WHERE Request_Number = ?', (modified_request, request_id))
+        # Commit the transaction and close the database connection
+        database.commit()
+        database.close()
+    except Exception as e:
+        print(f"Error intercepting request in database: {e}")
+
+def start_proxy_server(port=8888):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(('127.0.0.1', port))
@@ -101,4 +85,5 @@ def shutdown_server(signal, frame):
     sys.exit(0)
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, shutdown_server)
     start_proxy_server()

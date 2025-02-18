@@ -1,4 +1,5 @@
-from flask import Flask
+from flask import Flask, request, jsonify
+import requests
 
 app = Flask(__name__)
 
@@ -6,21 +7,27 @@ app = Flask(__name__)
 def hello_world():
     return 'Hello, World!'
 
-app.run(port=8080)
+@app.route('/api', methods=['POST'])
+def api():
+    # Get the JSON data from the request
+    data = request.get_json()
+    # Process the data as needed
+    response = {
+        'status': 'success',
+        'data': data
+    }
+    # Return a JSON response
+    return jsonify(response)
 
-@app.POST('/api')
-def api(request):
-    # ....Your code here
-    # return new_request
+# Proxy
+@app.route('/proxy', methods=['POST'])
+def proxy():
+    # Get the JSON data from the request
+    data = request.get_json()
+    # Forward the request to the /api endpoint
+    new_request = requests.post('http://127.0.0.1:8080/api', json=data)
+    # Return the response from the /api endpoint
+    return new_request.json()
 
-
-
-
-
-# PORXY
-import requests
-
-
-reuest
-new_request = requests.post('127.0.0.1:8080/api/', data=request)
-
+if __name__ == "__main__":
+    app.run(port=8080)
